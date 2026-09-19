@@ -62,17 +62,25 @@ jobs:
                   'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")\n'
               )
           p.write_text(s)
-          print(p.read_text())
           PY
 
       - name: Build unsigned universal release APK
         working-directory: buildsrc/rd-techno-factory-app
         run: gradle :app:assembleRelease --stacktrace
 
-      - name: Create test release signing key
+      - name: Restore persistent test signing key
+        id: signing-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.rdtechno-signing
+          key: rd-techno-test-signing-v1
+
+      - name: Create persistent test release signing key
+        if: steps.signing-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
-          keytool -genkeypair -v             -keystore "$RUNNER_TEMP/rd-techno-test.jks"             -storepass rdtechno2026             -keypass rdtechno2026             -alias rdtechno             -keyalg RSA -keysize 4096 -validity 3650             -dname "CN=R D Techno Internal Test, OU=Factory Tools, O=R D Techno, L=Punjab, C=IN"
+          mkdir -p "$HOME/.rdtechno-signing"
+          keytool -genkeypair -v             -keystore "$HOME/.rdtechno-signing/rd-techno-test.jks"             -storepass rdtechno2026             -keypass rdtechno2026             -alias rdtechno             -keyalg RSA -keysize 4096 -validity 3650             -dname "CN=R D Techno Internal Test, OU=Factory Tools, O=R D Techno, L=Punjab, C=IN"
 
       - name: Zipalign and sign APK
         shell: bash
@@ -80,7 +88,7 @@ jobs:
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           UNSIGNED="buildsrc/rd-techno-factory-app/app/build/outputs/apk/release/app-release-unsigned.apk"
           "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/rd-techno-aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign             --ks "$RUNNER_TEMP/rd-techno-test.jks"             --ks-pass pass:rdtechno2026             --key-pass pass:rdtechno2026             --ks-key-alias rdtechno             --v1-signing-enabled true             --v2-signing-enabled true             --v3-signing-enabled true             --out rd-techno-v0.1.1-compat-universal.apk             "$RUNNER_TEMP/rd-techno-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign             --ks "$HOME/.rdtechno-signing/rd-techno-test.jks"             --ks-pass pass:rdtechno2026             --key-pass pass:rdtechno2026             --ks-key-alias rdtechno             --v1-signing-enabled true             --v2-signing-enabled true             --v3-signing-enabled true             --out rd-techno-v0.1.1-compat-universal.apk             "$RUNNER_TEMP/rd-techno-aligned.apk"
 
       - name: Verify APK compatibility and signatures
         shell: bash
