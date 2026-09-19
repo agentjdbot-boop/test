@@ -1,8 +1,12 @@
-name: Build R D Techno v0.2 Glass APK
+name: Build R D Techno Final APK
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - ".github/workflows/build-apk.yml"
+      - "final-overlay/**"
+      - "build-source.zip"
   workflow_dispatch:
 
 permissions:
@@ -15,8 +19,10 @@ jobs:
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -34,127 +40,69 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Restore persistent test signing identity
+      - name: Restore persistent R D Techno test signing key
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: rd-techno-android-test-signing-v2
 
       - name: Extract base source
+        shell: bash
         run: |
           rm -rf buildsrc
           mkdir buildsrc
           unzip -q build-source.zip -d buildsrc
+          test -f buildsrc/rd-techno-factory-app/settings.gradle.kts
 
-      - name: Reconstruct and verify v0.2 UI overlay
+      - name: Apply final production UI overlay
         shell: bash
         run: |
-          cat overrides-v020.part0 overrides-v020.part1 overrides-v020.part2 overrides-v020.part3 > "$RUNNER_TEMP/overrides.b64"
-          test "$(wc -c < "$RUNNER_TEMP/overrides.b64")" -eq 30568
-          base64 -d "$RUNNER_TEMP/overrides.b64" > "$RUNNER_TEMP/rdtechno-overrides.tgz"
-          gzip -t "$RUNNER_TEMP/rdtechno-overrides.tgz"
-          tar -tzf "$RUNNER_TEMP/rdtechno-overrides.tgz" >/dev/null
-          tar -xzf "$RUNNER_TEMP/rdtechno-overrides.tgz" -C buildsrc/rd-techno-factory-app
+          cat final-overlay/p00 final-overlay/p01 final-overlay/p02 final-overlay/p03 > "$RUNNER_TEMP/final-overlay.b64"
+          test "$(wc -c < "$RUNNER_TEMP/final-overlay.b64")" -eq 31856
+          base64 -d "$RUNNER_TEMP/final-overlay.b64" > "$RUNNER_TEMP/final-overlay.tgz"
+          gzip -t "$RUNNER_TEMP/final-overlay.tgz"
+          tar -tzf "$RUNNER_TEMP/final-overlay.tgz" >/dev/null
+          tar -xzf "$RUNNER_TEMP/final-overlay.tgz" -C buildsrc/rd-techno-factory-app
+          test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OutwardShareImage.kt
           test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OrderShareImage.kt
-          grep -q 'versionName = "0.2.0-glass"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
-
-      - name: Fix Kotlin compile issues in v0.2 overlay
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          root = Path("buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui")
-
-          p = root / "OrderCalculatorReports.kt"
-          s = p.read_text()
-          s = s.replace(
-              'Button(onClick=onCart,enabled=draft.lines.isNotEmpty(),Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
-              'Button(onClick=onCart,enabled=draft.lines.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
-          )
-          s = s.replace(
-              'Button(onClick={vm.saveOrder(onSaved)},enabled=draft.lines.isNotEmpty(),Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
-              'Button(onClick={vm.saveOrder(onSaved)},enabled=draft.lines.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
-          )
-          p.write_text(s)
-
-          p = root / "OutwardScreens.kt"
-          s = p.read_text()
-          s = s.replace(
-              'Button(onClick=onContinue,enabled=draft.cart.values.any{it.quantity>0},Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
-              'Button(onClick=onContinue,enabled=draft.cart.values.any{it.quantity>0},modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
-          )
-          p.write_text(s)
-
-          p = root / "OrderShareImage.kt"
-          s = p.read_text()
-          s = s.replace(
-              'canvas.clipRoundRect(rect, 22f, 22f)',
-              'val clip = Path().apply { addRoundRect(rect, 22f, 22f, Path.Direction.CW) }\n        canvas.clipPath(clip)'
-          )
-          p.write_text(s)
-          PY
-
-      - name: Enable signed release test build
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path("buildsrc/rd-techno-factory-app/app/build.gradle.kts")
-          s=p.read_text()
-          s=s.replace(
-              'getByName("release") {\n            isMinifyEnabled = false',
-              'getByName("release") {\n            signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false'
-          )
-          p.write_text(s)
-          PY
+          test -f buildsrc/rd-techno-factory-app/app/src/main/res/xml/file_paths.xml
+          grep -q 'versionName = "0.3.0-final"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
 
       - name: Build release APK
         working-directory: buildsrc/rd-techno-factory-app
         run: gradle :app:assembleRelease --stacktrace
 
-      - name: Collect, sign and verify APK
+      - name: Create signing key if cache is empty
+        shell: bash
+        run: |
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v               -keystore "$HOME/.android/debug.keystore"               -storepass android               -keypass android               -alias androiddebugkey               -keyalg RSA -keysize 2048 -validity 10000               -dname "CN=R D Techno Test, OU=Factory Tools, O=R D Techno, L=Punjab, C=IN"
+          fi
+
+      - name: Zipalign, sign and verify final APK
         shell: bash
         run: |
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           UNSIGNED="$(find buildsrc/rd-techno-factory-app/app/build/outputs/apk/release -maxdepth 1 -type f -name '*-unsigned.apk' | head -1)"
           test -n "$UNSIGNED"
 
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -keypass android \
-              -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=R D Techno Test, OU=Factory Tools, O=R D Techno, L=Punjab, C=IN"
-          fi
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/rd-techno-final-aligned.apk"
 
-          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/rdtechno-aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign \
-            --ks "$HOME/.android/debug.keystore" \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --ks-key-alias androiddebugkey \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            --out rd-techno-v0.2.0-glass-universal.apk \
-            "$RUNNER_TEMP/rdtechno-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign             --ks "$HOME/.android/debug.keystore"             --ks-pass pass:android             --key-pass pass:android             --ks-key-alias androiddebugkey             --v1-signing-enabled true             --v2-signing-enabled true             --v3-signing-enabled true             --out rd-techno-v0.3.0-final.apk             "$RUNNER_TEMP/rd-techno-final-aligned.apk"
 
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.2.0-glass-universal.apk | tee apk-signature-report.txt
-          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.2.0-glass-universal.apk | tee apk-badging-report.txt
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.3.0-final.apk | tee apk-signature-report.txt
+          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.3.0-final.apk | tee apk-badging-report.txt
           grep -q "sdkVersion:'21'" apk-badging-report.txt
           grep -q "targetSdkVersion:'35'" apk-badging-report.txt
-          grep -q "versionName='0.2.0-glass'" apk-badging-report.txt
+          grep -q "versionName='0.3.0-final'" apk-badging-report.txt
 
-      - name: Upload APK
+      - name: Upload final APK
         uses: actions/upload-artifact@v4
         with:
-          name: rd-techno-v0.2.0-glass-universal
+          name: rd-techno-v0.3.0-final
           path: |
-            rd-techno-v0.2.0-glass-universal.apk
+            rd-techno-v0.3.0-final.apk
             apk-signature-report.txt
             apk-badging-report.txt
           if-no-files-found: error
