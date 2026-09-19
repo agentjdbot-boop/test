@@ -1,0 +1,104 @@
+name: Build R D Techno Final Verified
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/build-final.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        shell: bash
+        run: |
+          SDKMANAGER="$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | sort | tail -1)"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: rd-techno-android-test-signing-v2
+
+      - name: Prepare source
+        shell: bash
+        run: |
+          rm -rf buildsrc
+          mkdir buildsrc
+          unzip -q build-source.zip -d buildsrc
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, gzip, tarfile, io
+
+          repo = Path(".")
+          project = Path("buildsrc/rd-techno-factory-app")
+
+          ui64 = "".join((repo/"final-overlay"/f"p{i:02d}").read_text() for i in range(4))
+          data = base64.b64decode(ui64, validate=True)
+          with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+              tf.extractall(project)
+
+          vm64 = "".join((repo/"final-overlay"/f"vm{i}").read_text() for i in range(3))
+          vmdata = base64.b64decode(vm64, validate=True)
+          with tarfile.open(fileobj=io.BytesIO(vmdata), mode="r:gz") as tf:
+              tf.extractall(project)
+          PY
+          grep -q 'versionName = "0.3.0-final"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
+          grep -q 'data class OrderSummary' buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/viewmodel/FactoryViewModel.kt
+          test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OutwardShareImage.kt
+
+      - name: Build
+        working-directory: buildsrc/rd-techno-factory-app
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Create signing identity if needed
+        shell: bash
+        run: |
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=R D Techno Test, OU=Factory Tools, O=R D Techno, L=Punjab, C=IN"
+          fi
+
+      - name: Sign and verify
+        shell: bash
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="$(find buildsrc/rd-techno-factory-app/app/build/outputs/apk/release -maxdepth 1 -type f -name '*-unsigned.apk' | head -1)"
+          test -n "$UNSIGNED"
+          "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/final-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out rd-techno-v0.3.0-final.apk "$RUNNER_TEMP/final-aligned.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.3.0-final.apk > apk-signature-report.txt
+          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.3.0-final.apk > apk-badging-report.txt
+          grep -q "sdkVersion:'21'" apk-badging-report.txt
+          grep -q "targetSdkVersion:'35'" apk-badging-report.txt
+          grep -q "versionName='0.3.0-final'" apk-badging-report.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rd-techno-v0.3.0-final
+          path: |
+            rd-techno-v0.3.0-final.apk
+            apk-signature-report.txt
+            apk-badging-report.txt
+          if-no-files-found: error
