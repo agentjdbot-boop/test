@@ -63,8 +63,47 @@ jobs:
           vmdata = base64.b64decode(vm64, validate=True)
           with tarfile.open(fileobj=io.BytesIO(vmdata), mode="r:gz") as tf:
               tf.extractall(project)
+
+          # System-bar / keyboard safe-area compatibility:
+          # keep every screen above 3-button navigation bars, gesture areas,
+          # side navigation bars in landscape, and the on-screen keyboard.
+          app_file = project / "app/src/main/java/com/rdtechno/factory/ui/App.kt"
+          app = app_file.read_text()
+          if "import androidx.compose.ui.Modifier" not in app:
+              app = app.replace(
+                  "import androidx.compose.runtime.Composable\n",
+                  "import androidx.compose.runtime.Composable\n"
+                  "import androidx.compose.ui.Modifier\n"
+                  "import androidx.compose.foundation.layout.fillMaxSize\n"
+                  "import androidx.compose.foundation.layout.navigationBarsPadding\n"
+                  "import androidx.compose.foundation.layout.imePadding\n"
+              )
+          if ".navigationBarsPadding()" not in app:
+              old = "NavHost(navController = nav, startDestination = Routes.HOME) {"
+              new = "NavHost(navController = nav, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {"
+              if old not in app:
+                  raise RuntimeError("Could not locate root NavHost for safe-area patch")
+              app = app.replace(old, new, 1)
+          app_file.write_text(app)
+
+          manifest_file = project / "app/src/main/AndroidManifest.xml"
+          manifest = manifest_file.read_text()
+          if "android:windowSoftInputMode=" not in manifest and 'android:name=".MainActivity"' in manifest:
+              manifest = manifest.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"',
+                  1
+              )
+          manifest_file.write_text(manifest)
+
+          gradle_file = project / "app/build.gradle.kts"
+          gradle = gradle_file.read_text()
+          import re
+          gradle = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 4', gradle, count=1)
+          gradle = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.3.1-safearea"', gradle, count=1)
+          gradle_file.write_text(gradle)
           PY
-          grep -q 'versionName = "0.3.0-final"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
+          grep -q 'versionName = "0.3.1-safearea"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
           grep -q 'data class OrderSummary' buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/viewmodel/FactoryViewModel.kt
           test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OutwardShareImage.kt
 
@@ -87,18 +126,18 @@ jobs:
           UNSIGNED="$(find buildsrc/rd-techno-factory-app/app/build/outputs/apk/release -maxdepth 1 -type f -name '*-unsigned.apk' | head -1)"
           test -n "$UNSIGNED"
           "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/final-aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out rd-techno-v0.3.0-final.apk "$RUNNER_TEMP/final-aligned.apk"
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.3.0-final.apk > apk-signature-report.txt
-          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.3.0-final.apk > apk-badging-report.txt
+          "$BUILD_TOOLS/apksigner" sign --ks "$HOME/.android/debug.keystore" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true --out rd-techno-v0.3.1-safearea.apk "$RUNNER_TEMP/final-aligned.apk"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.3.1-safearea.apk > apk-signature-report.txt
+          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.3.1-safearea.apk > apk-badging-report.txt
           grep -q "sdkVersion:'21'" apk-badging-report.txt
           grep -q "targetSdkVersion:'35'" apk-badging-report.txt
-          grep -q "versionName='0.3.0-final'" apk-badging-report.txt
+          grep -q "versionName='0.3.1-safearea'" apk-badging-report.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rd-techno-v0.3.0-final
+          name: rd-techno-v0.3.1-safearea
           path: |
-            rd-techno-v0.3.0-final.apk
+            rd-techno-v0.3.1-safearea.apk
             apk-signature-report.txt
             apk-badging-report.txt
           if-no-files-found: error
