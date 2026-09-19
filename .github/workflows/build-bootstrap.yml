@@ -1,0 +1,55 @@
+name: Build R D Techno APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-bootstrap.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct Android project
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat bootstrap/project.zip.b64.1               bootstrap/project.zip.b64.2               bootstrap/project.zip.b64.3               bootstrap/project.zip.b64.4 > "$RUNNER_TEMP/project.b64"
+          base64 -d "$RUNNER_TEMP/project.b64" > "$RUNNER_TEMP/project.zip"
+          mkdir -p "$RUNNER_TEMP/rdtechno"
+          unzip -q "$RUNNER_TEMP/project.zip" -d "$RUNNER_TEMP/rdtechno"
+          test -f "$RUNNER_TEMP/rdtechno/settings.gradle.kts"
+          test -f "$RUNNER_TEMP/rdtechno/app/build.gradle.kts"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Build debug APK
+        working-directory: ${{ runner.temp }}/rdtechno
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rd-techno-v0.1-test
+          path: ${{ runner.temp }}/rdtechno/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
