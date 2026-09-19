@@ -18,3 +18,6 @@ This repository is currently being used as the connected build repository becaus
 - Location and Material management
 - Offline JSON backup/restore and CSV export
 - No Firebase, Google Sheets, Cloudflare, server or internet dependency for daily use
+
+
+Build source revision: v0.1 compile-fix-1
