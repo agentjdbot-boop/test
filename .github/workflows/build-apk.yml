@@ -117,7 +117,10 @@ jobs:
         shell: bash
         run: |
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          cp buildsrc/rd-techno-factory-app/app/build/outputs/apk/release/app-release.apk rd-techno-v0.2.0-glass-universal.apk
+          find buildsrc/rd-techno-factory-app/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print
+          APK="$(find buildsrc/rd-techno-factory-app/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -1)"
+          test -n "$APK"
+          cp "$APK" rd-techno-v0.2.0-glass-universal.apk
           "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.2.0-glass-universal.apk | tee apk-signature-report.txt
           "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.2.0-glass-universal.apk | tee apk-badging-report.txt
           grep -q "sdkVersion:'21'" apk-badging-report.txt
