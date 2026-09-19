@@ -58,6 +58,43 @@ jobs:
           test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OrderShareImage.kt
           grep -q 'versionName = "0.2.0-glass"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
 
+      - name: Fix Kotlin compile issues in v0.2 overlay
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path("buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui")
+
+          p = root / "OrderCalculatorReports.kt"
+          s = p.read_text()
+          s = s.replace(
+              'Button(onClick=onCart,enabled=draft.lines.isNotEmpty(),Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
+              'Button(onClick=onCart,enabled=draft.lines.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
+          )
+          s = s.replace(
+              'Button(onClick={vm.saveOrder(onSaved)},enabled=draft.lines.isNotEmpty(),Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
+              'Button(onClick={vm.saveOrder(onSaved)},enabled=draft.lines.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
+          )
+          p.write_text(s)
+
+          p = root / "OutwardScreens.kt"
+          s = p.read_text()
+          s = s.replace(
+              'Button(onClick=onContinue,enabled=draft.cart.values.any{it.quantity>0},Modifier.fillMaxWidth().padding(12.dp).height(50.dp))',
+              'Button(onClick=onContinue,enabled=draft.cart.values.any{it.quantity>0},modifier=Modifier.fillMaxWidth().padding(12.dp).height(50.dp))'
+          )
+          p.write_text(s)
+
+          p = root / "OrderShareImage.kt"
+          s = p.read_text()
+          s = s.replace(
+              'canvas.clipRoundRect(rect, 22f, 22f)',
+              'val clip = Path().apply { addRoundRect(rect, 22f, 22f, Path.Direction.CW) }\n        canvas.clipPath(clip)'
+          )
+          p.write_text(s)
+          PY
+
       - name: Enable signed release test build
         shell: bash
         run: |
