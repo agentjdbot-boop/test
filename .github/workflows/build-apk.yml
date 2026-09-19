@@ -1,10 +1,99 @@
-name: R D Techno APK Build Staging
+name: Build R D Techno v0.2 Glass APK
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  staging:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
-      - run: echo "Staging source update; final build workflow will be restored after upload."
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          SDKMANAGER="$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | sort | tail -1)"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-35" "build-tools;35.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Restore persistent test signing identity
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: rd-techno-android-test-signing-v2
+
+      - name: Extract base source
+        run: |
+          rm -rf buildsrc
+          mkdir buildsrc
+          unzip -q build-source.zip -d buildsrc
+
+      - name: Reconstruct and verify v0.2 UI overlay
+        shell: bash
+        run: |
+          cat overrides-v020.part0 overrides-v020.part1 overrides-v020.part2 overrides-v020.part3 > "$RUNNER_TEMP/overrides.b64"
+          test "$(wc -c < "$RUNNER_TEMP/overrides.b64")" -eq 30568
+          base64 -d "$RUNNER_TEMP/overrides.b64" > "$RUNNER_TEMP/rdtechno-overrides.tgz"
+          gzip -t "$RUNNER_TEMP/rdtechno-overrides.tgz"
+          tar -tzf "$RUNNER_TEMP/rdtechno-overrides.tgz" >/dev/null
+          tar -xzf "$RUNNER_TEMP/rdtechno-overrides.tgz" -C buildsrc/rd-techno-factory-app
+          test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OrderShareImage.kt
+          grep -q 'versionName = "0.2.0-glass"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
+
+      - name: Enable signed release test build
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("buildsrc/rd-techno-factory-app/app/build.gradle.kts")
+          s=p.read_text()
+          s=s.replace(
+              'getByName("release") {\n            isMinifyEnabled = false',
+              'getByName("release") {\n            signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false'
+          )
+          p.write_text(s)
+          PY
+
+      - name: Build release APK
+        working-directory: buildsrc/rd-techno-factory-app
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Collect and verify APK
+        shell: bash
+        run: |
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          cp buildsrc/rd-techno-factory-app/app/build/outputs/apk/release/app-release.apk rd-techno-v0.2.0-glass-universal.apk
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.2.0-glass-universal.apk | tee apk-signature-report.txt
+          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.2.0-glass-universal.apk | tee apk-badging-report.txt
+          grep -q "sdkVersion:'21'" apk-badging-report.txt
+          grep -q "targetSdkVersion:'35'" apk-badging-report.txt
+          grep -q "versionName='0.2.0-glass'" apk-badging-report.txt
+          grep -q "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'" apk-badging-report.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: rd-techno-v0.2.0-glass-universal
+          path: |
+            rd-techno-v0.2.0-glass-universal.apk
+            apk-signature-report.txt
+            apk-badging-report.txt
+          if-no-files-found: error
