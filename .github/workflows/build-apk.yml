@@ -68,6 +68,15 @@ jobs:
           test -f buildsrc/rd-techno-factory-app/app/src/main/res/xml/file_paths.xml
           grep -q 'versionName = "0.3.0-final"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
 
+      - name: Apply final order tracking viewmodel
+        shell: bash
+        run: |
+          test "$(wc -c < final-overlay/vm)" -eq 5160
+          base64 -d final-overlay/vm > "$RUNNER_TEMP/vm-overlay.tgz"
+          gzip -t "$RUNNER_TEMP/vm-overlay.tgz"
+          tar -xzf "$RUNNER_TEMP/vm-overlay.tgz" -C buildsrc/rd-techno-factory-app
+          grep -q "data class OrderSummary" buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/viewmodel/FactoryViewModel.kt
+
       - name: Build release APK
         working-directory: buildsrc/rd-techno-factory-app
         run: gradle :app:assembleRelease --stacktrace
