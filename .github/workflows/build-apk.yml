@@ -1,4 +1,4 @@
-name: Build R D Techno Compatibility APK
+name: Build R D Techno v0.2 Glass APK
 
 on:
   push:
@@ -41,28 +41,13 @@ jobs:
           mkdir buildsrc
           unzip -q build-source.zip -d buildsrc
 
-      - name: Apply broad Android compatibility settings
+      - name: Apply v0.2 glass UI and feature overrides
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path("buildsrc/rd-techno-factory-app/app/build.gradle.kts")
-          s = p.read_text()
-          s = s.replace("minSdk = 26", "minSdk = 21")
-          s = s.replace("versionCode = 1", "versionCode = 2")
-          s = s.replace('versionName = "0.1.0-test"', 'versionName = "0.1.1-compat"')
-          if "isCoreLibraryDesugaringEnabled" not in s:
-              s = s.replace(
-                  "targetCompatibility = JavaVersion.VERSION_17\n    }",
-                  "targetCompatibility = JavaVersion.VERSION_17\n        isCoreLibraryDesugaringEnabled = true\n    }"
-              )
-          if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")' not in s:
-              s = s.replace(
-                  "dependencies {\n",
-                  'dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.2")\n'
-              )
-          p.write_text(s)
-          PY
+          base64 -d overrides-v020.tgz.b64 > "$RUNNER_TEMP/rdtechno-overrides.tgz"
+          tar -xzf "$RUNNER_TEMP/rdtechno-overrides.tgz" -C buildsrc/rd-techno-factory-app
+          test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OrderShareImage.kt
+          grep -q 'versionName = "0.2.0-glass"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
 
       - name: Build unsigned universal release APK
         working-directory: buildsrc/rd-techno-factory-app
@@ -88,24 +73,25 @@ jobs:
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
           UNSIGNED="buildsrc/rd-techno-factory-app/app/build/outputs/apk/release/app-release-unsigned.apk"
           "$BUILD_TOOLS/zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/rd-techno-aligned.apk"
-          "$BUILD_TOOLS/apksigner" sign             --ks "$HOME/.rdtechno-signing/rd-techno-test.jks"             --ks-pass pass:rdtechno2026             --key-pass pass:rdtechno2026             --ks-key-alias rdtechno             --v1-signing-enabled true             --v2-signing-enabled true             --v3-signing-enabled true             --out rd-techno-v0.1.1-compat-universal.apk             "$RUNNER_TEMP/rd-techno-aligned.apk"
+          "$BUILD_TOOLS/apksigner" sign             --ks "$HOME/.rdtechno-signing/rd-techno-test.jks"             --ks-pass pass:rdtechno2026             --key-pass pass:rdtechno2026             --ks-key-alias rdtechno             --v1-signing-enabled true             --v2-signing-enabled true             --v3-signing-enabled true             --out rd-techno-v0.2.0-glass-universal.apk             "$RUNNER_TEMP/rd-techno-aligned.apk"
 
       - name: Verify APK compatibility and signatures
         shell: bash
         run: |
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.1.1-compat-universal.apk | tee apk-signature-report.txt
-          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.1.1-compat-universal.apk | tee apk-badging-report.txt
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs rd-techno-v0.2.0-glass-universal.apk | tee apk-signature-report.txt
+          "$BUILD_TOOLS/aapt" dump badging rd-techno-v0.2.0-glass-universal.apk | tee apk-badging-report.txt
           grep -q "sdkVersion:'21'" apk-badging-report.txt
           grep -q "targetSdkVersion:'35'" apk-badging-report.txt
+          grep -q "versionName='0.2.0-glass'" apk-badging-report.txt
           grep -q "native-code: 'arm64-v8a' 'armeabi-v7a' 'x86' 'x86_64'" apk-badging-report.txt
 
-      - name: Upload compatibility APK
+      - name: Upload v0.2 glass APK
         uses: actions/upload-artifact@v4
         with:
-          name: rd-techno-v0.1.1-compat-universal
+          name: rd-techno-v0.2.0-glass-universal
           path: |
-            rd-techno-v0.1.1-compat-universal.apk
+            rd-techno-v0.2.0-glass-universal.apk
             apk-signature-report.txt
             apk-badging-report.txt
           if-no-files-found: error
