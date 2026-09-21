@@ -1,0 +1,199 @@
+name: Export R D Techno Workspace Backup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - ".github/workflows/export-backup.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct exact v0.3.1 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf buildsrc backup
+          mkdir -p buildsrc backup
+          unzip -q build-source.zip -d buildsrc
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64, tarfile, io, re
+
+          repo = Path(".")
+          project = Path("buildsrc/rd-techno-factory-app")
+
+          ui64 = "".join((repo/"final-overlay"/f"p{i:02d}").read_text() for i in range(4))
+          data = base64.b64decode(ui64, validate=True)
+          with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+              tf.extractall(project)
+
+          vm64 = "".join((repo/"final-overlay"/f"vm{i}").read_text() for i in range(3))
+          vmdata = base64.b64decode(vm64, validate=True)
+          with tarfile.open(fileobj=io.BytesIO(vmdata), mode="r:gz") as tf:
+              tf.extractall(project)
+
+          app_file = project / "app/src/main/java/com/rdtechno/factory/ui/App.kt"
+          app = app_file.read_text()
+          if "import androidx.compose.ui.Modifier" not in app:
+              app = app.replace(
+                  "import androidx.compose.runtime.Composable\n",
+                  "import androidx.compose.runtime.Composable\n"
+                  "import androidx.compose.ui.Modifier\n"
+                  "import androidx.compose.foundation.layout.fillMaxSize\n"
+                  "import androidx.compose.foundation.layout.navigationBarsPadding\n"
+                  "import androidx.compose.foundation.layout.imePadding\n"
+              )
+          if ".navigationBarsPadding()" not in app:
+              app = app.replace(
+                  "NavHost(navController = nav, startDestination = Routes.HOME) {",
+                  "NavHost(navController = nav, startDestination = Routes.HOME, modifier = Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {",
+                  1
+              )
+          app_file.write_text(app)
+
+          manifest_file = project / "app/src/main/AndroidManifest.xml"
+          manifest = manifest_file.read_text()
+          if "android:windowSoftInputMode=" not in manifest and 'android:name=".MainActivity"' in manifest:
+              manifest = manifest.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"',
+                  1
+              )
+          manifest_file.write_text(manifest)
+
+          gradle_file = project / "app/build.gradle.kts"
+          gradle = gradle_file.read_text()
+          gradle = re.sub(r'versionCode\s*=\s*\d+', 'versionCode = 4', gradle, count=1)
+          gradle = re.sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "0.3.1-safearea"', gradle, count=1)
+          gradle_file.write_text(gradle)
+          PY
+
+          test -f buildsrc/rd-techno-factory-app/app/src/main/java/com/rdtechno/factory/ui/OutwardShareImage.kt
+          grep -q 'versionName = "0.3.1-safearea"' buildsrc/rd-techno-factory-app/app/build.gradle.kts
+
+      - name: Assemble backup tree
+        shell: bash
+        run: |
+          mkdir -p backup/RD-Techno-v0.3.1/source
+          mkdir -p backup/RD-Techno-v0.3.1/github-build
+          mkdir -p backup/RD-Techno-v0.3.1/docs
+
+          cp -a buildsrc/rd-techno-factory-app/. backup/RD-Techno-v0.3.1/source/
+          cp -a .github backup/RD-Techno-v0.3.1/github-build/
+          cp build-source.zip backup/RD-Techno-v0.3.1/github-build/
+          cp -a final-overlay backup/RD-Techno-v0.3.1/github-build/
+
+          cat > backup/RD-Techno-v0.3.1/README-FIRST.md <<'EOF'
+          # R D Techno App — Master Backup
+
+          This backup reconstructs the exact Android source used for v0.3.1-safearea.
+
+          ## Current app
+          - App: R D Techno
+          - Version: 0.3.1-safearea
+          - Android minimum: API 21 / Android 5.0
+          - Target SDK: API 35
+          - Architecture: native Android, Kotlin, Jetpack Compose, Room
+          - Main functions: Outward, Calculator, Orders, Reports, Manage
+          - Offline local database
+          - Product add/edit/delete and product images
+          - Outward and Order image-sheet sharing
+          - Safe-area support for gesture and 3-button navigation bars
+          - Keyboard resize / IME-safe layout
+
+          ## Most important folder
+          source/
+
+          Open this folder in Android Studio for future app changes.
+
+          ## GitHub build recovery
+          github-build/ contains:
+          - original build-source.zip
+          - final-overlay chunks used during development
+          - GitHub Actions workflows
+
+          These are retained as a second recovery path, but future development should use source/ as the canonical project.
+
+          ## Future ChatGPT handoff
+          Upload this backup ZIP in a new chat and say:
+          "Continue development of my R D Techno Android app from this master backup. Keep all existing functions and data model unless I explicitly ask to change them."
+
+          ## Signing warning
+          The current test APK was signed through the GitHub Actions test-signing workflow.
+          The private signing key is NOT intentionally stored inside this source backup.
+          Before public/Play production release, create and securely preserve a permanent production signing setup (or use Google Play App Signing).
+          Source code and app data are independent of that signing key.
+          EOF
+
+          cat > backup/RD-Techno-v0.3.1/docs/FUTURE-UPDATE-CHECKLIST.md <<'EOF'
+          # Future Update Checklist
+
+          1. Start from the source/ project in this backup.
+          2. Keep applicationId/package unchanged unless intentionally migrating.
+          3. Increase versionCode for every APK update.
+          4. Keep minSdk 21 unless a feature absolutely requires newer Android.
+          5. Preserve navigationBarsPadding / IME safe-area behavior.
+          6. Test both gesture navigation and classic 3-button navigation.
+          7. Test small phone, tall phone, and landscape where relevant.
+          8. Preserve Room migrations/data compatibility when database schema changes.
+          9. Test image sharing to WhatsApp and Android Sharesheet.
+          10. Back up the source again after every stable release.
+          EOF
+
+          cat > backup/RD-Techno-v0.3.1/docs/PROJECT-STRUCTURE.md <<'EOF'
+          # Project Structure
+
+          source/app/src/main/java/com/rdtechno/factory/ui/
+          - App.kt — navigation/root app
+          - Theme.kt — visual theme
+          - Components.kt — reusable UI
+          - OutwardScreens.kt — outward flow
+          - OrderCalculatorReports.kt — orders/calculator/reports
+          - ManageScreens.kt — products/materials/locations/settings
+          - OutwardShareImage.kt — outward image sheet generation/sharing
+          - OrderShareImage.kt — order image sheet generation/sharing
+
+          source/app/src/main/java/com/rdtechno/factory/viewmodel/
+          - FactoryViewModel.kt — app state and business logic
+
+          source/app/src/main/java/com/rdtechno/factory/data/
+          - Room database/entities/DAO/repository
+          - seed/import and backup helpers
+
+          source/app/src/main/res/
+          - Android resources and FileProvider paths
+          EOF
+
+          cat > backup/RD-Techno-v0.3.1/VERSION.txt <<'EOF'
+          R D Techno
+          Backup version: v0.3.1-safearea
+          versionCode: 4
+          minSdk: 21
+          targetSdk: 35
+          EOF
+
+          find backup/RD-Techno-v0.3.1 -type f | sort > backup/RD-Techno-v0.3.1/docs/FILE-LIST.txt
+
+      - name: Create source backup ZIP
+        shell: bash
+        run: |
+          cd backup
+          zip -qr ../rd-techno-workspace-source-v0.3.1.zip RD-Techno-v0.3.1
+          cd ..
+          unzip -tq rd-techno-workspace-source-v0.3.1.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rd-techno-workspace-source-v0.3.1
+          path: rd-techno-workspace-source-v0.3.1.zip
+          if-no-files-found: error
